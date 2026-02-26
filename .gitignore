@@ -52,3 +52,8 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Local config (nunca commitar valores reais)
+appsettings.Local.json
+appsettings.*.Local.json
+**/secrets.json
