@@ -27,11 +27,9 @@ Tudo sobe containerizado, com hot reload na API.
 Na raiz do repositório (`MyCriptoNoteBack/`), crie o arquivo `.env` (ele não é versionado):
 
 ```env
-POSTGRES_PASSWORD=postgres
-JWT_KEY=SuperSecretKeyForDev_MustBeAtLeast32Chars!
+POSTGRES_PASSWORD=
+JWT_KEY=
 ```
-
-Ajuste a senha e a chave JWT se quiser; em produção use valores seguros.
 
 ### 2. Subir os serviços
 
@@ -79,8 +77,6 @@ docker compose down -v
 ---
 
 ## Rodar localmente (sem Docker)
-
-Útil para desenvolver e debugar a API direto na máquina.
 
 ### 1. Subir o PostgreSQL
 
