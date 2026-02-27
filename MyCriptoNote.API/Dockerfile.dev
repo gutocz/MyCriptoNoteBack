@@ -1,0 +1,15 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+
+WORKDIR /app/src
+
+COPY *.csproj ./
+RUN dotnet restore
+
+COPY . .
+
+ENV ASPNETCORE_URLS=http://+:5116
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+
+EXPOSE 5116
+
+ENTRYPOINT ["dotnet", "watch", "run", "--non-interactive"]

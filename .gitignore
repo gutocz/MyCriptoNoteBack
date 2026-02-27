@@ -57,3 +57,6 @@ nunit-*.xml
 appsettings.Local.json
 appsettings.*.Local.json
 **/secrets.json
+
+# Docker
+.env
