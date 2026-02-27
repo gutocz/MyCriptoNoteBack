@@ -12,4 +12,4 @@ ENV DOTNET_USE_POLLING_FILE_WATCHER=true
 
 EXPOSE 5116
 
-ENTRYPOINT ["dotnet", "watch", "run", "--non-interactive"]
+ENTRYPOINT ["dotnet", "watch", "run", "--non-interactive", "--no-launch-profile"]

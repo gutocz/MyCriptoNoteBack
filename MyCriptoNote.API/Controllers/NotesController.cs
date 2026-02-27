@@ -48,7 +48,6 @@ public class NotesController : ControllerBase
     public async Task<ActionResult<NoteListItem>> Create(CreateNoteRequest request)
     {
         var userId = User.GetUserId();
-        string? folderSalt = null;
 
         if (request.FolderId.HasValue)
         {
@@ -56,19 +55,18 @@ public class NotesController : ControllerBase
                 f => f.Id == request.FolderId.Value && f.UserId == userId);
             if (folder == null)
                 throw new NotFoundException("Pasta não encontrada.");
-            folderSalt = folder.Salt;
         }
 
-        var salt = folderSalt ?? null;
-        var result = _cryptoService.Encrypt(request.Content, request.Password, salt);
+        var result = _cryptoService.Encrypt(request.Content, request.Password);
 
         var note = new Note
         {
             Id = Guid.NewGuid(),
             Title = request.Title,
             EncryptedContent = result.EncryptedContent,
-            Salt = request.FolderId.HasValue ? null : result.Salt,
+            Salt = result.Salt,
             IV = result.IV,
+            AuthTag = result.AuthTag,
             FolderId = request.FolderId,
             UserId = userId,
             CreatedAt = DateTime.UtcNow
@@ -92,8 +90,7 @@ public class NotesController : ControllerBase
         var userId = User.GetUserId();
         var note = await GetNoteWithOwnershipCheck(id, userId);
 
-        var salt = await GetEffectiveSalt(note);
-        var content = _cryptoService.Decrypt(note.EncryptedContent, request.Password, salt, note.IV);
+        var content = _cryptoService.Decrypt(note.EncryptedContent, request.Password, note.Salt, note.IV, note.AuthTag);
 
         return Ok(new UnlockedNote
         {
@@ -109,17 +106,17 @@ public class NotesController : ControllerBase
         var userId = User.GetUserId();
         var note = await GetNoteWithOwnershipCheck(id, userId);
 
-        var salt = await GetEffectiveSalt(note);
-        var currentContent = _cryptoService.Decrypt(note.EncryptedContent, request.Password, salt, note.IV);
+        var currentContent = _cryptoService.Decrypt(note.EncryptedContent, request.Password, note.Salt, note.IV, note.AuthTag);
 
         var newTitle = request.Title ?? note.Title;
         var newContent = request.Content ?? currentContent;
 
-        var result = _cryptoService.Encrypt(newContent, request.Password, salt);
+        var result = _cryptoService.Encrypt(newContent, request.Password, note.Salt);
 
         note.Title = newTitle;
         note.EncryptedContent = result.EncryptedContent;
         note.IV = result.IV;
+        note.AuthTag = result.AuthTag;
 
         await _context.SaveChangesAsync();
 
@@ -144,32 +141,19 @@ public class NotesController : ControllerBase
         var userId = User.GetUserId();
         var note = await GetNoteWithOwnershipCheck(id, userId);
 
-        if (note.FolderId.HasValue)
-            throw new AppException("A nota já está em uma pasta. Remova-a primeiro.");
-
         var folder = await _context.Folders.FirstOrDefaultAsync(
             f => f.Id == request.FolderId && f.UserId == userId);
         if (folder == null)
             throw new NotFoundException("Pasta não encontrada.");
 
-        var currentSalt = note.Salt
-            ?? throw new AppException("Os dados desta nota estão corrompidos e não podem ser recuperados.", 500);
-
-        var content = _cryptoService.Decrypt(note.EncryptedContent, request.NotePassword, currentSalt, note.IV);
-        var result = _cryptoService.Encrypt(content, request.FolderPassword, folder.Salt);
-
-        note.EncryptedContent = result.EncryptedContent;
-        note.IV = result.IV;
-        note.Salt = null;
         note.FolderId = folder.Id;
-
         await _context.SaveChangesAsync();
 
         return NoContent();
     }
 
     [HttpPost("{id}/remove-from-folder")]
-    public async Task<IActionResult> RemoveFromFolder(Guid id, RemoveFromFolderRequest request)
+    public async Task<IActionResult> RemoveFromFolder(Guid id)
     {
         var userId = User.GetUserId();
         var note = await GetNoteWithOwnershipCheck(id, userId);
@@ -177,21 +161,7 @@ public class NotesController : ControllerBase
         if (!note.FolderId.HasValue)
             throw new AppException("A nota não está em nenhuma pasta.");
 
-        var folder = await _context.Folders.FirstOrDefaultAsync(
-            f => f.Id == note.FolderId.Value && f.UserId == userId);
-        if (folder == null)
-            throw new NotFoundException("Pasta não encontrada.");
-
-        var content = _cryptoService.Decrypt(note.EncryptedContent, request.FolderPassword, folder.Salt, note.IV);
-
-        var newSalt = _cryptoService.GenerateSalt();
-        var result = _cryptoService.Encrypt(content, request.NewNotePassword, newSalt);
-
-        note.EncryptedContent = result.EncryptedContent;
-        note.IV = result.IV;
-        note.Salt = result.Salt;
         note.FolderId = null;
-
         await _context.SaveChangesAsync();
 
         return NoContent();
@@ -205,18 +175,5 @@ public class NotesController : ControllerBase
         if (note.UserId != userId)
             throw new ForbiddenException("Você não tem permissão para acessar esta nota.");
         return note;
-    }
-
-    private async Task<string> GetEffectiveSalt(Note note)
-    {
-        if (note.FolderId.HasValue)
-        {
-            var folder = await _context.Folders.FirstOrDefaultAsync(f => f.Id == note.FolderId.Value);
-            return folder?.Salt
-                ?? throw new AppException("Os dados desta nota estão corrompidos e não podem ser recuperados.", 500);
-        }
-
-        return note.Salt
-            ?? throw new AppException("Os dados desta nota estão corrompidos e não podem ser recuperados.", 500);
     }
 }

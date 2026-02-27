@@ -6,7 +6,6 @@ using MyCriptoNote.API.DTOs.Folders;
 using MyCriptoNote.API.Exceptions;
 using MyCriptoNote.API.Extensions;
 using MyCriptoNote.API.Models;
-using MyCriptoNote.API.Services;
 
 namespace MyCriptoNote.API.Controllers;
 
@@ -16,12 +15,10 @@ namespace MyCriptoNote.API.Controllers;
 public class FoldersController : ControllerBase
 {
     private readonly AppDbContext _context;
-    private readonly ICryptoService _cryptoService;
 
-    public FoldersController(AppDbContext context, ICryptoService cryptoService)
+    public FoldersController(AppDbContext context)
     {
         _context = context;
-        _cryptoService = cryptoService;
     }
 
     [HttpGet]
@@ -52,7 +49,7 @@ public class FoldersController : ControllerBase
         {
             Id = Guid.NewGuid(),
             Name = request.Name,
-            Salt = _cryptoService.GenerateSalt(),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             UserId = userId,
             CreatedAt = DateTime.UtcNow
         };
@@ -66,6 +63,23 @@ public class FoldersController : ControllerBase
             Name = folder.Name,
             CreatedAt = folder.CreatedAt
         });
+    }
+
+    [HttpPost("{id}/unlock")]
+    public async Task<IActionResult> Unlock(Guid id, UnlockFolderRequest request)
+    {
+        var userId = User.GetUserId();
+
+        var folder = await _context.Folders.FirstOrDefaultAsync(f => f.Id == id);
+        if (folder == null)
+            throw new NotFoundException("Pasta não encontrada.");
+        if (folder.UserId != userId)
+            throw new ForbiddenException("Você não tem permissão para acessar esta pasta.");
+
+        if (!BCrypt.Net.BCrypt.Verify(request.Password, folder.PasswordHash))
+            return Unauthorized(new { error = "Senha incorreta." });
+
+        return Ok();
     }
 
     [HttpDelete("{id}")]
