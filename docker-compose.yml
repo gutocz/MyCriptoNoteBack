@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mycriptonote-db
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: mycriptonote_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mycriptonote-net
+
+  api:
+    build:
+      context: ./MyCriptoNote.API
+      dockerfile: Dockerfile.dev
+    container_name: mycriptonote-api
+    restart: unless-stopped
+    ports:
+      - "5116:5116"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:5116
+      DOTNET_USE_POLLING_FILE_WATCHER: "true"
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=mycriptonote_dev;Username=postgres;Password=${POSTGRES_PASSWORD:-postgres}"
+      Jwt__Key: ${JWT_KEY:-SuperSecretKeyForDev_MustBeAtLeast32Chars!}
+      Jwt__Issuer: MyCriptoNote
+      Jwt__Audience: MyCriptoNote
+      Jwt__ExpirationInHours: 24
+      Cors__AllowedOrigins__0: http://localhost:4200
+    volumes:
+      - ./MyCriptoNote.API:/app/src
+      - api-bin:/app/src/bin
+      - api-obj:/app/src/obj
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mycriptonote-net
+
+volumes:
+  pgdata:
+  api-bin:
+  api-obj:
+
+networks:
+  mycriptonote-net:
+    name: mycriptonote-net
