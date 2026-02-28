@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using MyCriptoNote.API.Data;
 using MyCriptoNote.API.DTOs.Folders;
@@ -66,6 +67,7 @@ public class FoldersController : ControllerBase
     }
 
     [HttpPost("{id}/unlock")]
+    [EnableRateLimiting("unlock")]
     public async Task<IActionResult> Unlock(Guid id, UnlockFolderRequest request)
     {
         var userId = User.GetUserId();

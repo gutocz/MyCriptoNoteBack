@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using MyCriptoNote.API.Data;
 using MyCriptoNote.API.DTOs.Notes;
@@ -85,6 +86,7 @@ public class NotesController : ControllerBase
     }
 
     [HttpPost("{id}/unlock")]
+    [EnableRateLimiting("unlock")]
     public async Task<ActionResult<UnlockedNote>> Unlock(Guid id, UnlockNoteRequest request)
     {
         var userId = User.GetUserId();
