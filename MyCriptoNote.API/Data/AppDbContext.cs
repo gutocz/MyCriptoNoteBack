@@ -28,6 +28,7 @@ public class AppDbContext : DbContext
             entity.HasKey(f => f.Id);
             entity.Property(f => f.Name).IsRequired().HasMaxLength(100);
             entity.Property(f => f.PasswordHash).IsRequired();
+            entity.HasIndex(f => f.UserId);
 
             entity.HasOne(f => f.User)
                   .WithMany(u => u.Folders)
@@ -43,6 +44,8 @@ public class AppDbContext : DbContext
             entity.Property(n => n.Salt).IsRequired();
             entity.Property(n => n.IV).IsRequired();
             entity.Property(n => n.AuthTag).IsRequired(false);
+            entity.HasIndex(n => n.UserId);
+            entity.HasIndex(n => n.FolderId);
 
             entity.HasOne(n => n.User)
                   .WithMany(u => u.Notes)
