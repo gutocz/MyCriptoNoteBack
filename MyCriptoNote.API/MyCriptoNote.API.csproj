@@ -17,6 +17,7 @@
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.*" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.*" />
+    <PackageReference Include="Google.Apis.Auth" Version="1.68.*" />
   </ItemGroup>
 
 </Project>
