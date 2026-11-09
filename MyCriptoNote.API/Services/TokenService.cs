@@ -15,7 +15,7 @@ public class TokenService : ITokenService
         _configuration = configuration;
     }
 
-    public string GenerateToken(User user)
+    public string GenerateToken(User user, Guid sessionId)
     {
         var key = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!));
@@ -24,7 +24,8 @@ public class TokenService : ITokenService
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Email, user.Email)
+            new Claim(ClaimTypes.Email, user.Email),
+            new Claim(JwtRegisteredClaimNames.Jti, sessionId.ToString())
         };
 
         var expiration = int.Parse(_configuration["Jwt:ExpirationInHours"] ?? "24");

@@ -12,6 +12,17 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -19,3 +30,20 @@ jobs:
           dotnet-version: '8.0.x'
       - run: dotnet restore MyCriptoNote.API/MyCriptoNote.API.csproj
       - run: dotnet build MyCriptoNote.API/MyCriptoNote.API.csproj --configuration Release --no-restore
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Test authentication and folder authorization
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ASPNETCORE_URLS: http://127.0.0.1:5116
+          ConnectionStrings__DefaultConnection: Host=127.0.0.1;Port=5432;Database=ci;Username=ci;Password=ci-only
+          Jwt__Key: ci-only-signing-key-at-least-thirty-two-bytes
+          Jwt__Issuer: MyCriptoNote
+          Jwt__Audience: MyCriptoNote
+          TEST_API_URL: http://127.0.0.1:5116/api
+        run: |
+          dotnet run --project MyCriptoNote.API --configuration Release --no-build --no-launch-profile > /tmp/api.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:5116/health >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:5116/health >/dev/null || { cat /tmp/api.log; exit 1; }
+          node tests/security-integration.mjs

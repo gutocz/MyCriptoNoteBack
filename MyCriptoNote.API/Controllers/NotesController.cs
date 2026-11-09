@@ -18,11 +18,13 @@ public class NotesController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly ICryptoService _cryptoService;
+    private readonly FolderGrantService _grants;
 
-    public NotesController(AppDbContext context, ICryptoService cryptoService)
+    public NotesController(AppDbContext context, ICryptoService cryptoService, FolderGrantService grants)
     {
         _context = context;
         _cryptoService = cryptoService;
+        _grants = grants;
     }
 
     [HttpGet]
@@ -30,8 +32,10 @@ public class NotesController : ControllerBase
     {
         var userId = User.GetUserId();
 
+        var folders = await _context.Folders.Where(f => f.UserId == userId).Select(f => f.Id).ToListAsync();
+        var unlocked = folders.Where(id => _grants.HasGrant(HttpContext, userId, id)).ToArray();
         var notes = await _context.Notes
-            .Where(n => n.UserId == userId)
+            .Where(n => n.UserId == userId && (!n.FolderId.HasValue || unlocked.Contains(n.FolderId.Value)))
             .OrderByDescending(n => n.CreatedAt)
             .Select(n => new NoteListItem
             {
@@ -56,6 +60,7 @@ public class NotesController : ControllerBase
                 f => f.Id == request.FolderId.Value && f.UserId == userId);
             if (folder == null)
                 throw new NotFoundException("Pasta não encontrada.");
+            RequireFolderGrant(userId, folder.Id);
         }
 
         var result = _cryptoService.Encrypt(request.Content, request.Password);
@@ -148,6 +153,8 @@ public class NotesController : ControllerBase
         if (folder == null)
             throw new NotFoundException("Pasta não encontrada.");
 
+        RequireFolderGrant(userId, folder.Id);
+
         note.FolderId = folder.Id;
         await _context.SaveChangesAsync();
 
@@ -176,6 +183,14 @@ public class NotesController : ControllerBase
             throw new NotFoundException("Nota não encontrada.");
         if (note.UserId != userId)
             throw new ForbiddenException("Você não tem permissão para acessar esta nota.");
+        if (note.FolderId.HasValue)
+            RequireFolderGrant(userId, note.FolderId.Value);
         return note;
+    }
+
+    private void RequireFolderGrant(Guid userId, Guid folderId)
+    {
+        if (!_grants.HasGrant(HttpContext, userId, folderId))
+            throw new ForbiddenException("Desbloqueie a pasta novamente.");
     }
 }
