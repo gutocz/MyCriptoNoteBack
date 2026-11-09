@@ -10,13 +10,13 @@ namespace MyCriptoNote.API.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("UPDATE \"Users\" SET \"AuthProvider\" = 'local' WHERE \"AuthProvider\" IS NULL OR \"AuthProvider\" = ''");
+            migrationBuilder.Sql("UPDATE \"Users\" SET \"AuthProvider\" = 'local' WHERE \"AuthProvider\" IS NULL OR \"AuthProvider\" = '';");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("UPDATE \"Users\" SET \"AuthProvider\" = '' WHERE \"AuthProvider\" = 'local' AND \"GoogleId\" IS NULL");
+            migrationBuilder.Sql("UPDATE \"Users\" SET \"AuthProvider\" = '' WHERE \"AuthProvider\" = 'local' AND \"GoogleId\" IS NULL;");
         }
     }
 }
