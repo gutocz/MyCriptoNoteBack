@@ -28,6 +28,7 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-MyCriptoNote}
       Jwt__Audience: ${JWT_AUDIENCE:-MyCriptoNote}
       Jwt__ExpirationInHours: ${JWT_EXPIRATION:-24}
+      Google__ClientId: ${GOOGLE_CLIENT_ID}
       AllowedHosts: ${ALLOWED_HOSTS}
       Cors__AllowedOrigins__0: ${CORS_ORIGIN}
     depends_on:

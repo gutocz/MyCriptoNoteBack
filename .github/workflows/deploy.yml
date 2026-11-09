@@ -5,7 +5,11 @@ on:
     branches: [main]
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   deploy:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - name: Deploy na VPS via SSH
@@ -14,9 +18,12 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          command_timeout: 20m
           script: |
             set -e
             cd /var/www/mycriptonote/backend
-            git pull origin main
+            git pull --ff-only origin main
+            test "$(git rev-parse HEAD)" = "${{ github.sha }}" || { echo "A main mudou desde o CI; deploy cancelado."; exit 1; }
             docker compose -f docker-compose.prod.yml build api
             docker compose -f docker-compose.prod.yml up -d api
+            docker image prune -f

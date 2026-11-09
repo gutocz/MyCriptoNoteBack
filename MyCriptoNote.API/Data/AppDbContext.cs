@@ -20,7 +20,10 @@ public class AppDbContext : DbContext
             entity.HasKey(u => u.Id);
             entity.HasIndex(u => u.Email).IsUnique();
             entity.Property(u => u.Email).IsRequired().HasMaxLength(256);
-            entity.Property(u => u.PasswordHash).IsRequired();
+            entity.Property(u => u.PasswordHash).IsRequired(false);
+            entity.Property(u => u.AuthProvider).IsRequired().HasMaxLength(16);
+            entity.Property(u => u.GoogleId).IsRequired(false);
+            entity.HasIndex(u => u.GoogleId).IsUnique();
         });
 
         modelBuilder.Entity<Folder>(entity =>
