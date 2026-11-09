@@ -22,6 +22,25 @@ namespace MyCriptoNote.API.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("MyCriptoNote.API.Models.AuthSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("AuthSessions");
+                });
+
             modelBuilder.Entity("MyCriptoNote.API.Models.Folder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -128,6 +147,17 @@ namespace MyCriptoNote.API.Migrations
                         .IsUnique();
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("MyCriptoNote.API.Models.AuthSession", b =>
+                {
+                    b.HasOne("MyCriptoNote.API.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("MyCriptoNote.API.Models.Folder", b =>
