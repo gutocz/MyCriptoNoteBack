@@ -4,5 +4,5 @@ namespace MyCriptoNote.API.Services;
 
 public interface ITokenService
 {
-    string GenerateToken(User user);
+    string GenerateToken(User user, Guid sessionId);
 }

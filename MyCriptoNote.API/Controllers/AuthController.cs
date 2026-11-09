@@ -10,6 +10,8 @@ using MyCriptoNote.API.Models;
 using MyCriptoNote.API.Services;
 using Google.Apis.Auth;
 using Microsoft.Extensions.Configuration;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 
 namespace MyCriptoNote.API.Controllers;
 
@@ -21,13 +23,17 @@ public class AuthController : ControllerBase
     private readonly ITokenService _tokenService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthController> _logger;
+    private readonly FolderGrantService _grants;
+    private readonly IWebHostEnvironment _environment;
 
-    public AuthController(AppDbContext context, ITokenService tokenService, IConfiguration configuration, ILogger<AuthController> logger)
+    public AuthController(AppDbContext context, ITokenService tokenService, IConfiguration configuration, ILogger<AuthController> logger, FolderGrantService grants, IWebHostEnvironment environment)
     {
         _context = context;
         _tokenService = tokenService;
         _configuration = configuration;
         _logger = logger;
+        _grants = grants;
+        _environment = environment;
     }
 
     [HttpPost("register")]
@@ -51,7 +57,7 @@ public class AuthController : ControllerBase
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        var token = _tokenService.GenerateToken(user);
+        var token = await IssueSession(user);
 
         return Ok(ToAuthResponse(user, token));
     }
@@ -65,14 +71,13 @@ public class AuthController : ControllerBase
         if (user == null)
             return Unauthorized(new { error = "errors.invalidCredentials" });
 
-        var provider = string.IsNullOrWhiteSpace(user.AuthProvider) ? "local" : user.AuthProvider;
-        if (provider != "local" || string.IsNullOrEmpty(user.PasswordHash))
+        if (string.IsNullOrEmpty(user.PasswordHash))
             return Unauthorized(new { error = "errors.invalidCredentials" });
 
         if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             return Unauthorized(new { error = "errors.invalidCredentials" });
 
-        var token = _tokenService.GenerateToken(user);
+        var token = await IssueSession(user);
 
         return Ok(ToAuthResponse(user, token));
     }
@@ -99,7 +104,7 @@ public class AuthController : ControllerBase
             var user = await _context.Users.FirstOrDefaultAsync(u => u.GoogleId == payload.Subject);
             if (user != null)
             {
-                var token = _tokenService.GenerateToken(user);
+                var token = await IssueSession(user);
                 return Ok(ToAuthResponse(user, token));
             }
 
@@ -120,7 +125,7 @@ public class AuthController : ControllerBase
             _context.Users.Add(newUser);
             await _context.SaveChangesAsync();
 
-            var newToken = _tokenService.GenerateToken(newUser);
+            var newToken = await IssueSession(newUser);
             return Ok(ToAuthResponse(newUser, newToken));
         }
         catch (Exception ex)
@@ -172,7 +177,7 @@ public class AuthController : ControllerBase
             {
                 if (currentUser.GoogleId == payload.Subject)
                 {
-                    var sameToken = _tokenService.GenerateToken(currentUser);
+                    var sameToken = await IssueSession(currentUser);
                     return Ok(ToAuthResponse(currentUser, sameToken));
                 }
 
@@ -190,10 +195,10 @@ public class AuthController : ControllerBase
 
             currentUser.AuthProvider = "google";
             currentUser.GoogleId = payload.Subject;
-            currentUser.PasswordHash = null;
+            await _context.AuthSessions.Where(s => s.UserId == currentUser.Id).ExecuteDeleteAsync();
             await _context.SaveChangesAsync();
 
-            var token = _tokenService.GenerateToken(currentUser);
+            var token = await IssueSession(currentUser);
             return Ok(ToAuthResponse(currentUser, token));
         }
         catch (Exception ex)
@@ -202,6 +207,68 @@ public class AuthController : ControllerBase
             return BadRequest(new { error = "errors.googleLoginFailed" });
         }
     }
+
+    [HttpPost("logout")]
+    [Authorize]
+    public async Task<IActionResult> Logout()
+    {
+        if (Guid.TryParse(User.FindFirstValue(JwtRegisteredClaimNames.Jti), out var sessionId))
+            await _context.AuthSessions.Where(s => s.Id == sessionId && s.UserId == User.GetUserId()).ExecuteDeleteAsync();
+        Response.Cookies.Delete("mcn_session", SessionCookieOptions());
+        return NoContent();
+    }
+
+    [HttpPost("google/set-password")]
+    [Authorize]
+    [EnableRateLimiting("auth")]
+    public async Task<IActionResult> SetGooglePassword(SetGooglePasswordRequest request)
+    {
+        var clientId = _configuration["Google:ClientId"];
+        if (string.IsNullOrWhiteSpace(clientId)) return StatusCode(500, new { error = "errors.googleNotConfigured" });
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == User.GetUserId());
+        if (user == null || string.IsNullOrEmpty(user.GoogleId) || !string.IsNullOrEmpty(user.PasswordHash))
+            return BadRequest(new { error = "errors.googlePasswordUnavailable" });
+        try
+        {
+            var payload = await GoogleJsonWebSignature.ValidateAsync(request.Credential, BuildGoogleValidation(clientId));
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (payload.Subject != user.GoogleId || !payload.IssuedAtTimeSeconds.HasValue ||
+                payload.IssuedAtTimeSeconds.Value > now + 60 || now - payload.IssuedAtTimeSeconds.Value > 300)
+                return BadRequest(new { error = "errors.googleLoginFailed" });
+            // Atomic update avoids replacing an existing password on concurrent requests.
+            var hash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+            var changed = await _context.Users.Where(u => u.Id == user.Id && u.PasswordHash == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(u => u.PasswordHash, hash));
+            if (changed != 1) return Conflict(new { error = "errors.googlePasswordUnavailable" });
+            return NoContent();
+        }
+        catch (InvalidJwtException)
+        {
+            return BadRequest(new { error = "errors.googleLoginFailed" });
+        }
+    }
+
+    private async Task<string> IssueSession(User user)
+    {
+        var hours = int.Parse(_configuration["Jwt:ExpirationInHours"] ?? "24");
+        await _context.AuthSessions.Where(s => s.UserId == user.Id && s.ExpiresAt <= DateTime.UtcNow).ExecuteDeleteAsync();
+        var session = new AuthSession { Id = Guid.NewGuid(), UserId = user.Id, ExpiresAt = DateTime.UtcNow.AddHours(hours) };
+        _context.AuthSessions.Add(session);
+        await _context.SaveChangesAsync();
+        var token = _tokenService.GenerateToken(user, session.Id);
+        var options = SessionCookieOptions();
+        options.Expires = session.ExpiresAt;
+        Response.Cookies.Append("mcn_session", token, options);
+        return token;
+    }
+
+    private CookieOptions SessionCookieOptions() => new()
+    {
+        HttpOnly = true,
+        Secure = !_environment.IsDevelopment(),
+        SameSite = SameSiteMode.Strict,
+        Path = "/api"
+    };
 
     [HttpDelete("account")]
     [Authorize]
@@ -230,7 +297,8 @@ public class AuthController : ControllerBase
         return Ok(new MeResponse
         {
             Email = user.Email,
-            AuthProvider = NormalizeAuthProvider(user)
+            AuthProvider = NormalizeAuthProvider(user),
+            HasPassword = !string.IsNullOrEmpty(user.PasswordHash)
         });
     }
 
@@ -247,6 +315,9 @@ public class AuthController : ControllerBase
 
         if (user == null)
             throw new NotFoundException("Usuário não encontrado.");
+
+        if (user.Folders.Any(f => !_grants.HasGrant(HttpContext, userId, f.Id)))
+            return StatusCode(403, new { error = "Desbloqueie todas as pastas antes de exportar os dados." });
 
         var data = new
         {
@@ -289,7 +360,7 @@ public class AuthController : ControllerBase
     private static AuthResponse ToAuthResponse(User user, string token) =>
         new()
         {
-            Token = token,
+            Token = string.Empty,
             Email = user.Email,
             AuthProvider = NormalizeAuthProvider(user)
         };

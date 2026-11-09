@@ -7,6 +7,8 @@ using MyCriptoNote.API.DTOs.Folders;
 using MyCriptoNote.API.Exceptions;
 using MyCriptoNote.API.Extensions;
 using MyCriptoNote.API.Models;
+using MyCriptoNote.API.Services;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace MyCriptoNote.API.Controllers;
 
@@ -16,10 +18,12 @@ namespace MyCriptoNote.API.Controllers;
 public class FoldersController : ControllerBase
 {
     private readonly AppDbContext _context;
+    private readonly FolderGrantService _grants;
 
-    public FoldersController(AppDbContext context)
+    public FoldersController(AppDbContext context, FolderGrantService grants)
     {
         _context = context;
+        _grants = grants;
     }
 
     [HttpGet]
@@ -81,7 +85,9 @@ public class FoldersController : ControllerBase
         if (!BCrypt.Net.BCrypt.Verify(request.Password, folder.PasswordHash))
             return Unauthorized(new { error = "Senha incorreta." });
 
-        return Ok();
+        var sessionId = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+        if (string.IsNullOrEmpty(sessionId)) return Unauthorized();
+        return Ok(new { grant = _grants.Issue(userId, folder.Id, sessionId) });
     }
 
     [HttpDelete("{id}")]
@@ -94,6 +100,9 @@ public class FoldersController : ControllerBase
             throw new NotFoundException("Pasta não encontrada.");
         if (folder.UserId != userId)
             throw new ForbiddenException("Você não tem permissão para acessar esta pasta.");
+
+        if (!_grants.HasGrant(HttpContext, userId, folder.Id))
+            return StatusCode(403, new { error = "Desbloqueie a pasta novamente." });
 
         _context.Folders.Remove(folder);
         await _context.SaveChangesAsync();

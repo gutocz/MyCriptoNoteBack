@@ -1,6 +1,10 @@
 using System.Text;
+using System.Net;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -27,10 +31,32 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddScoped<ICryptoService, CryptoService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<FolderGrantService>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                context.Token = context.Request.Cookies["mcn_session"];
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = async context =>
+            {
+                var principal = context.Principal;
+                if (!Guid.TryParse(principal?.FindFirstValue(JwtRegisteredClaimNames.Jti), out var sessionId) ||
+                    !Guid.TryParse(principal?.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+                {
+                    context.Fail("Invalid session");
+                    return;
+                }
+                var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                if (!await db.AuthSessions.AnyAsync(s => s.Id == sessionId && s.UserId == userId && s.ExpiresAt > DateTime.UtcNow))
+                    context.Fail("Session revoked or expired");
+            }
+        };
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -89,7 +115,7 @@ builder.Services.AddSwaggerGen(options =>
     {
         Title = "MyCriptoNote API",
         Version = "v1",
-        Description = "API para gerenciamento de notas criptografadas com arquitetura Zero-Knowledge."
+        Description = "API para gerenciamento de notas criptografadas no servidor."
     });
 
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -125,12 +151,29 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(
                 builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                 ?? new[] { "http://localhost:4200" })
-              .WithHeaders("Authorization", "Content-Type", "Accept", "Accept-Language")
+              .WithHeaders("Authorization", "Content-Type", "Accept", "Accept-Language", "X-Folder-Grants", "X-MCN-Request")
               .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
     });
 });
 
 var app = builder.Build();
+
+// Only an explicitly configured reverse proxy is allowed to supply client IPs.
+var trustedProxy = builder.Configuration["ReverseProxy:TrustedIp"];
+if (!string.IsNullOrWhiteSpace(trustedProxy))
+{
+    if (!IPAddress.TryParse(trustedProxy, out var proxyAddress))
+        throw new InvalidOperationException("ReverseProxy:TrustedIp must be an IP address.");
+    var forwardedOptions = new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+        ForwardLimit = 1
+    };
+    forwardedOptions.KnownProxies.Clear();
+    forwardedOptions.KnownNetworks.Clear();
+    forwardedOptions.KnownProxies.Add(proxyAddress);
+    app.UseForwardedHeaders(forwardedOptions);
+}
 
 if (app.Environment.IsDevelopment())
 {
@@ -140,6 +183,20 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+// Unsafe cookie-authenticated requests require a non-simple header. Browsers
+// cannot send it cross-origin without an explicitly allowed CORS preflight.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api") &&
+        !HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method) &&
+        !HttpMethods.IsOptions(context.Request.Method) && context.Request.Headers["X-MCN-Request"] != "1")
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+    await next();
+});
 
 app.Use(async (context, next) =>
 {
