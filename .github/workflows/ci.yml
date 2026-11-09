@@ -1,0 +1,21 @@
+name: Backend CI
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet restore MyCriptoNote.API/MyCriptoNote.API.csproj
+      - run: dotnet build MyCriptoNote.API/MyCriptoNote.API.csproj --configuration Release --no-restore
