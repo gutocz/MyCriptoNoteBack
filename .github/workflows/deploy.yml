@@ -29,6 +29,8 @@ jobs:
             git clone --quiet --no-checkout https://github.com/gutocz/MyCriptoNoteBack.git "$release/source"
             git -C "$release/source" checkout --quiet --detach '${{ github.sha }}'
             test "$(git -C "$release/source" rev-parse HEAD)" = '${{ github.sha }}'
-            printf 'services:\n  api:\n    build:\n      context: %s/source/MyCriptoNote.API\n    environment:\n      Google__ClientId: %s\n' "$release" '67406151511-upcvoaioteslopt4jgantn61v22k8e94.apps.googleusercontent.com' > "$release/compose.override.yml"
+            # Preserve VPS-only production settings using a read-only bind mount.
+            test -f MyCriptoNote.API/appsettings.Production.json
+            printf 'services:\n  api:\n    build:\n      context: %s/source/MyCriptoNote.API\n    environment:\n      Google__ClientId: %s\n    volumes:\n      - /var/www/mycriptonote/backend/MyCriptoNote.API/appsettings.Production.json:/app/appsettings.Production.json:ro\n' "$release" '67406151511-upcvoaioteslopt4jgantn61v22k8e94.apps.googleusercontent.com' > "$release/compose.override.yml"
             docker compose -f docker-compose.prod.yml -f "$release/compose.override.yml" build api
             docker compose -f docker-compose.prod.yml -f "$release/compose.override.yml" up -d --no-deps api
